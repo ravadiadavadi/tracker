@@ -258,7 +258,7 @@ function byKey(k){return function(a,b){var x=a[k]||"9999",y=b[k]||"9999";return 
 /* ---------- render ---------- */
 function render(){
   var chip=VIEW?(viewer.error?"Couldn't load: "+viewer.error:viewer.loaded?"View only · updated "+timeAgo(state.updatedAt||viewer.at):"Loading…"):(SYNC.token&&SYNC.gist?(SYNC.status||"Synced"):saveMsg);
-  var title=VIEW?(viewer.owner?esc(viewer.owner)+"'s tracker":"Tracker"):"Tracker";
+  var title=VIEW?(viewer.loaded?esc(state.greeting||"Welcome Mrs. Rohith"):"Tracker"):"Tracker";
   var h='<div class="wrap'+(VIEW?" ro":"")+'"><div class="top"><div><h1>'+title+'</h1><p class="sub">'+fmt(TODAY)+'</p></div><span class="chip" id="save" role="status">'+esc(chip)+'</span></div>';
   h+=timeline();
   h+='<div class="tabs" role="tablist">';
@@ -507,7 +507,7 @@ function backupView(){
     h+='<p class="sub">Connected as <b>'+esc(SYNC.login||"you")+'</b>. '+(SYNC.at?"Last synced "+timeAgo(SYNC.at)+".":"")+'</p>';
     if(SYNC.gist){
       h+='<div class="form" style="grid-template-columns:1fr auto"><label>View-only link<input type="text" id="vlink" readonly value="'+esc(link)+'"></label><button class="primary" data-act="copylink">Copy link</button></div>'+
-        '<p class="sub" style="font-size:.85rem">Anyone with this link can see everything here but can\'t change anything. To stop sharing, delete the gist on GitHub and reconnect.</p>';
+        '<div class="form" style="grid-template-columns:1fr"><label>Greeting shown on the view-only link<input type="text" id="greet" value="'+esc(state.greeting||"Welcome Mrs. Rohith")+'"></label></div><p class="sub" style="font-size:.85rem">Anyone with this link can see everything here but can\'t change anything. To stop sharing, delete the gist on GitHub and reconnect.</p>';
     }
     h+='<div class="btns" style="margin-top:12px"><button class="ghost" data-act="syncnow">Sync now</button><button class="ghost" data-act="disconnect">Disconnect this device</button></div>';
   }
@@ -666,6 +666,7 @@ document.addEventListener("change",function(e){
     save();}
   else if(d.sf){var s=find(state.schools,d.sid);if(!s)return;s[d.sf]=t.value;save();}
   else if(d.sck){var s2=find(state.schools,d.sid);if(!s2)return;s2.checks=s2.checks||{};s2.checks[d.sck]=t.checked;save();}
+  else if(t.id==="greet"){state.greeting=t.value.trim()||"Welcome Mrs. Rohith";save();}
   else if(t.id==="sd"&&t.value){state.startDate=t.value;save();}
   else if(t.id==="imp"&&t.files[0])importData(t.files[0]);
 });
