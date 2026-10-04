@@ -258,7 +258,7 @@ function byKey(k){return function(a,b){var x=a[k]||"9999",y=b[k]||"9999";return 
 /* ---------- render ---------- */
 function render(){
   var chip=VIEW?(viewer.error?"Couldn't load: "+viewer.error:viewer.loaded?"View only · updated "+timeAgo(state.updatedAt||viewer.at):"Loading…"):(SYNC.token&&SYNC.gist?(SYNC.status||"Synced"):saveMsg);
-  var title=VIEW?(viewer.loaded?esc(state.greeting||"Welcome Mrs. Rohith"):"Tracker"):"Tracker";
+  var title=VIEW?(viewer.loaded?esc(state.greeting||"Greetings Mrs. Hema Sree Rohith <3"):"Tracker"):"Welcome Rohith!";
   var h='<div class="wrap'+(VIEW?" ro":"")+'"><div class="top"><div><h1>'+title+'</h1><p class="sub">'+fmt(TODAY)+'</p></div><span class="chip" id="save" role="status">'+esc(chip)+'</span></div>';
   h+=timeline();
   h+='<div class="tabs" role="tablist">';
