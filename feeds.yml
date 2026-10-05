@@ -1,0 +1,412 @@
+name: Update feeds
+
+on:
+  schedule:
+    - cron: "30 0 * * *"   # daily, 6:00 AM IST
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Rebuild full archives from scratch"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency: feeds
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build feeds.json
+        env:
+          GIST_ID: ${{ vars.GIST_ID }}
+          GH_TOKEN: ${{ github.token }}
+          FULL: ${{ inputs.full }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, time, html
+          import urllib.request, urllib.parse, urllib.error
+          import xml.etree.ElementTree as ET
+          from email.utils import parsedate_to_datetime
+          from datetime import datetime, timezone
+          from concurrent.futures import ThreadPoolExecutor
+
+          UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+          OUT = "feeds.json"
+          MAX_PAGES = 250
+          MAX_ITEMS = 4000
+          DEFAULT = [
+              ("Sander Dieleman", "https://sander.ai/feed.xml"),
+              ("Francis Bach", "https://francisbach.com/feed/"),
+              ("Off the Convex Path", "http://www.offconvex.org/feed.xml"),
+              ("Google DeepMind", "https://deepmind.google/blog/rss.xml"),
+              ("The Gradient", "https://thegradient.pub/rss/"),
+              ("Terence Tao", "https://terrytao.wordpress.com/feed/"),
+              ("The n-Category Café", "https://golem.ph.utexas.edu/category/atom10.xml"),
+              ("Quanta Magazine", "https://www.quantamagazine.org/feed/"),
+          ]
+
+
+          def log(*a):
+              print(*a, flush=True)
+
+
+          def get(url, timeout=30, tries=3, headers=None):
+              last = None
+              for i in range(tries):
+                  try:
+                      h = {"User-Agent": UA, "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/html;q=0.8, */*;q=0.5"}
+                      if headers:
+                          h.update(headers)
+                      req = urllib.request.Request(url, headers=h)
+                      with urllib.request.urlopen(req, timeout=timeout) as r:
+                          raw = r.read()
+                          return raw.decode(r.headers.get_content_charset() or "utf-8", "replace")
+                  except urllib.error.HTTPError as e:
+                      last = e
+                      if e.code in (400, 401, 403, 404, 410):
+                          break
+                  except Exception as e:
+                      last = e
+                  time.sleep(1.5 * (i + 1))
+              raise last or RuntimeError("fetch failed")
+
+
+          def strip_tags(s):
+              s = html.unescape(s or "")
+              s = re.sub(r"<[^>]+>", " ", s)
+              s = html.unescape(s)
+              return re.sub(r"\s+", " ", s).strip()
+
+
+          def norm_date(s):
+              s = (s or "").strip()
+              if not s:
+                  return ""
+              try:
+                  return parsedate_to_datetime(s).strftime("%Y-%m-%d")
+              except Exception:
+                  pass
+              m = re.match(r"(\d{4})-(\d{2})-(\d{2})", s)
+              return "-".join(m.groups()) if m else ""
+
+
+          def local(tag):
+              return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+
+          def regex_parse(text):
+              out = []
+              for blk in re.findall(r"<(?:item|entry)\b.*?</(?:item|entry)>", text, re.S | re.I):
+                  def tag(names):
+                      for n in names:
+                          m = re.search(r"<%s\b[^>]*>(.*?)</%s>" % (n, n), blk, re.S | re.I)
+                          if m:
+                              return re.sub(r"^\s*<!\[CDATA\[(.*)\]\]>\s*$", r"\1", m.group(1), flags=re.S)
+                      return ""
+                  d = {"t": strip_tags(tag(["title"])),
+                       "d": norm_date(strip_tags(tag(["pubDate", "published", "dc:date", "updated"]))),
+                       "s": strip_tags(tag(["description", "summary", "content:encoded", "content"])),
+                       "g": strip_tags(tag(["guid", "id"]))}
+                  m = re.search(r'<link[^>]*rel=["\']alternate["\'][^>]*href=["\']([^"\']+)', blk) or re.search(r'<link[^>]*href=["\']([^"\']+)', blk)
+                  d["l"] = html.unescape(m.group(1)) if m else strip_tags(tag(["link"]))
+                  out.append(d)
+              return out
+
+
+          def parse_feed(text):
+              items = []
+              try:
+                  root = ET.fromstring(text.lstrip("\ufeff").strip())
+                  for el in root.iter():
+                      if local(el.tag) not in ("item", "entry"):
+                          continue
+                      d = {}
+                      for c in el:
+                          cn = local(c.tag)
+                          txt = "".join(c.itertext())
+                          if cn == "title" and "t" not in d:
+                              d["t"] = strip_tags(txt)
+                          elif cn == "link":
+                              href, rel = c.get("href"), c.get("rel", "alternate")
+                              if href and rel == "alternate" and "l" not in d:
+                                  d["l"] = href.strip()
+                              elif not href and txt.strip() and "l" not in d:
+                                  d["l"] = txt.strip()
+                          elif cn in ("pubDate", "published", "date") and "d" not in d:
+                              d["d"] = norm_date(txt)
+                          elif cn == "updated" and "u" not in d:
+                              d["u"] = norm_date(txt)
+                          elif cn in ("description", "summary", "encoded", "content") and "s" not in d:
+                              d["s"] = strip_tags(txt)
+                          elif cn in ("guid", "id") and "g" not in d:
+                              d["g"] = txt.strip()
+                      items.append(d)
+              except ET.ParseError:
+                  items = regex_parse(text)
+              out = []
+              for d in items:
+                  link = d.get("l") or ""
+                  if not link.startswith("http") and (d.get("g") or "").startswith("http"):
+                      link = d["g"]
+                  if not link.startswith("http"):
+                      continue
+                  s = d.get("s", "")
+                  if len(s) > 220:
+                      s = s[:217].rsplit(" ", 1)[0] + "…"
+                  out.append({"t": d.get("t") or "(untitled)", "l": link, "d": d.get("d") or d.get("u", ""), "s": s})
+              return out
+
+
+          def key(u):
+              p = urllib.parse.urlparse(u)
+              return (p.netloc.lower().replace("www.", "") + p.path.rstrip("/")).lower()
+
+
+          def set_query(url, k, v):
+              p = urllib.parse.urlparse(url)
+              q = dict(urllib.parse.parse_qsl(p.query))
+              q[k] = str(v)
+              return urllib.parse.urlunparse(p._replace(query=urllib.parse.urlencode(q)))
+
+
+          def page_generators(url):
+              p = urllib.parse.urlparse(url)
+              gens = []
+              if re.search(r"/rss/?$", p.path):
+                  base = url.split("?")[0].rstrip("/")
+                  gens.append(lambda n: "%s/%d/" % (base, n))
+              if "feed" in p.path or "wordpress" in p.netloc:
+                  gens.append(lambda n: set_query(url, "paged", n))
+              return gens
+
+
+          def crawl_pages(url, first):
+              seen = {key(i["l"]) for i in first}
+              allit = list(first)
+              for gen in page_generators(url):
+                  got = 0
+                  for n in range(2, MAX_PAGES + 1):
+                      try:
+                          items = parse_feed(get(gen(n), tries=2))
+                      except Exception:
+                          break
+                      new = [i for i in items if key(i["l"]) not in seen]
+                      if not new:
+                          break
+                      for i in new:
+                          seen.add(key(i["l"]))
+                          allit.append(i)
+                      got += len(new)
+                      time.sleep(0.4)
+                  if got:
+                      return allit, True
+              return allit, False
+
+
+          def sitemap_locs(url):
+              p = urllib.parse.urlparse(url)
+              origin = "%s://%s" % (p.scheme, p.netloc)
+              cands = []
+              try:
+                  cands += re.findall(r"(?im)^\s*sitemap:\s*(\S+)", get(origin + "/robots.txt", tries=1))
+              except Exception:
+                  pass
+              cands += [origin + "/sitemap.xml", origin + "/sitemap_index.xml", origin + "/wp-sitemap.xml"]
+              queue, visited, locs = list(dict.fromkeys(cands)), set(), {}
+              while queue and len(visited) < 40:
+                  sm = queue.pop(0)
+                  if sm in visited:
+                      continue
+                  visited.add(sm)
+                  try:
+                      txt = get(sm, tries=1)
+                  except Exception:
+                      continue
+                  if "<sitemapindex" in txt:
+                      kids = [html.unescape(k) for k in re.findall(r"<loc>\s*(.*?)\s*</loc>", txt)]
+                      kids = [k for k in kids if not re.search(r"(tag|categor|author|page|image|video|product|user)", k.rsplit("/", 1)[-1], re.I)]
+                      kids.sort(key=lambda k: 0 if re.search(r"post|blog|article", k, re.I) else 1)
+                      queue += kids
+                      continue
+                  for m in re.finditer(r"<url>(.*?)</url>", txt, re.S):
+                      b = m.group(1)
+                      l = re.search(r"<loc>\s*(.*?)\s*</loc>", b)
+                      if l:
+                          lm = re.search(r"<lastmod>\s*(.*?)\s*</lastmod>", b)
+                          locs[html.unescape(l.group(1))] = norm_date(lm.group(1)) if lm else ""
+              return locs
+
+
+          def post_filter(feed_url, first_links):
+              p = urllib.parse.urlparse(feed_url)
+              base = re.sub(r"/(feed|rss|atom)[^/]*/?$|/[^/]*\.(xml|rss|atom)$", "/", p.path) or "/"
+              hosts = {urllib.parse.urlparse(l).netloc.lower().replace("www.", "") for l in first_links} or {p.netloc.lower().replace("www.", "")}
+              dated = sum(1 for l in first_links if re.search(r"/\d{4}/\d{2}/", l))
+              need_date = first_links and dated >= max(1, len(first_links) // 2)
+
+              def ok(u):
+                  q = urllib.parse.urlparse(u)
+                  if q.netloc.lower().replace("www.", "") not in hosts:
+                      return False
+                  if not q.path.startswith(base) or q.path.rstrip("/") in ("", base.rstrip("/")):
+                      return False
+                  if re.search(r"/(tag|tags|category|categories|author|page|feed|search|about|archives?|wp-content|wp-json)(/|$)", q.path):
+                      return False
+                  if re.search(r"\.(xml|jpe?g|png|gif|pdf|svg|css|js)$", q.path, re.I):
+                      return False
+                  if need_date and not re.search(r"/\d{4}/\d{2}/", q.path):
+                      return False
+                  return True
+              return ok
+
+
+          def slug_title(u):
+              seg = [s for s in urllib.parse.urlparse(u).path.split("/") if s]
+              s = re.sub(r"\.html?$", "", seg[-1] if seg else u)
+              s = re.sub(r"[-_]+", " ", urllib.parse.unquote(s)).strip()
+              return s[:1].upper() + s[1:] if s else u
+
+
+          def url_date(u):
+              m = re.search(r"/(\d{4})/(\d{2})(?:/(\d{2}))?/", u)
+              return "%s-%s-%s" % (m.group(1), m.group(2), m.group(3) or "01") if m else ""
+
+
+          def page_meta(u):
+              try:
+                  t = get(u, timeout=20, tries=1, headers={"Accept": "text/html"})
+              except Exception:
+                  return None
+              m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)', t) or re.search(r"<title[^>]*>(.*?)</title>", t, re.S | re.I)
+              title = strip_tags(m.group(1)) if m else ""
+              for sep in (" | ", " – ", " — ", " - ", " « "):
+                  if sep in title and len(title.split(sep)[0]) > 8:
+                      title = title.split(sep)[0].strip()
+                      break
+              d = (re.search(r'article:published_time["\'][^>]+content=["\']([^"\']+)', t)
+                   or re.search(r'"datePublished"\s*:\s*"([^"]+)"', t)
+                   or re.search(r'<time[^>]+datetime=["\']([^"\']+)', t))
+              m2 = re.search(r'<meta[^>]+(?:name|property)=["\'](?:og:)?description["\'][^>]+content=["\']([^"\']+)', t)
+              s = strip_tags(m2.group(1)) if m2 else ""
+              if len(s) > 220:
+                  s = s[:217].rsplit(" ", 1)[0] + "…"
+              return {"t": title, "d": norm_date(d.group(1)) if d else "", "s": s}
+
+
+          def from_sitemap(url, items):
+              locs = sitemap_locs(url)
+              if not locs:
+                  return []
+              ok = post_filter(url, [i["l"] for i in items])
+              have = {key(i["l"]) for i in items}
+              missing = [u for u in locs if ok(u) and key(u) not in have]
+              if not missing:
+                  return []
+              log("   sitemap: %d extra posts" % len(missing))
+              metas = [None] * len(missing)
+              if len(missing) <= 600:
+                  with ThreadPoolExecutor(6) as ex:
+                      metas = list(ex.map(page_meta, missing))
+              out = []
+              for u, m in zip(missing, metas):
+                  m = m or {}
+                  out.append({"t": m.get("t") or slug_title(u), "l": u, "d": m.get("d") or url_date(u) or locs.get(u, ""), "s": m.get("s", "")})
+              return out
+
+
+          def merge(*lists):
+              seen, out = set(), []
+              for lst in lists:
+                  for i in lst or []:
+                      k = key(i["l"])
+                      if k not in seen:
+                          seen.add(k)
+                          out.append(i)
+              out.sort(key=lambda i: i.get("d") or "0000", reverse=True)
+              return out[:MAX_ITEMS]
+
+
+          def build(name, url, prev, full):
+              log("-> %s" % name)
+              try:
+                  first = parse_feed(get(url))
+                  if not first:
+                      raise RuntimeError("no articles in feed")
+              except Exception as e:
+                  log("   failed: %s" % e)
+                  if prev:
+                      return dict(prev, error=str(e)[:120])
+                  return {"name": name, "items": [], "error": str(e)[:120]}
+              if prev and prev.get("archived") and not full:
+                  return {"name": name, "items": merge(first, prev.get("items")), "archived": True, "mode": prev.get("mode", "feed")}
+              items, paged = crawl_pages(url, first)
+              mode = "paged" if paged else "feed"
+              if not paged:
+                  try:
+                      extra = from_sitemap(url, items)
+                      if extra:
+                          items += extra
+                          mode = "sitemap"
+                  except Exception as e:
+                      log("   sitemap failed: %s" % e)
+              log("   %d articles (%s)" % (len(items), mode))
+              return {"name": name, "items": merge(items, prev and prev.get("items")), "archived": True, "mode": mode}
+
+
+          def feed_list():
+              gid = (os.environ.get("GIST_ID") or "").strip()
+              if gid:
+                  try:
+                      hdr = {"Accept": "application/vnd.github+json"}
+                      tok = os.environ.get("GH_TOKEN")
+                      if tok:
+                          hdr["Authorization"] = "Bearer " + tok
+                      g = json.loads(get("https://api.github.com/gists/" + gid, headers=hdr))
+                      f = g["files"]["tracker-data.json"]
+                      data = json.loads(get(f["raw_url"]) if f.get("truncated") else f["content"])
+                      feeds = [(x.get("name") or x["url"], x["url"]) for x in data.get("feeds", []) if x.get("url")]
+                      log("Using %d feeds from your tracker" % len(feeds))
+                      return feeds
+                  except Exception as e:
+                      log("Couldn't read feeds from gist (%s); using defaults" % e)
+              else:
+                  log("GIST_ID not set; using default feeds")
+              return DEFAULT
+
+
+          def main():
+              full = (os.environ.get("FULL") or "").lower() == "true"
+              prev = {}
+              if os.path.exists(OUT):
+                  try:
+                      prev = json.load(open(OUT)).get("feeds", {})
+                  except Exception:
+                      prev = {}
+              feeds = feed_list()
+              with ThreadPoolExecutor(4) as ex:
+                  results = list(ex.map(lambda f: build(f[0], f[1], prev.get(f[1]), full), feeds))
+              out = {"generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "feeds": {}}
+              for (name, url), r in zip(feeds, results):
+                  r["name"] = name
+                  out["feeds"][url] = r
+              with open(OUT, "w") as fh:
+                  json.dump(out, fh, ensure_ascii=False, separators=(",", ":"))
+              log("Wrote %s" % OUT)
+
+
+          if __name__ == "__main__":
+              main()
+          PY
+
+      - name: Commit feeds.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add feeds.json
+          git diff --cached --quiet || (git commit -m "Update feeds" && git push)
