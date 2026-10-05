@@ -161,6 +161,24 @@ a.primary{font:600 .95rem "Figtree",sans-serif;background:var(--teal);color:var(
 
 .ro .form,.ro .del,.ro [data-act=reroll],.ro [data-readtoggle],.ro [data-act=refresh]{display:none!important}
 .ro .pnotes:disabled{resize:none;opacity:1}
+
+.cnt{font-weight:500;color:var(--muted);font-size:.8em;margin-left:2px}
+.fhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin:8px 0}
+.fbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.fbar input[type=search]{flex:1 1 220px}
+.linkbtn{background:none;border:0;padding:0;font:500 1rem "Figtree",sans-serif;color:var(--ink);cursor:pointer;text-align:left}
+.linkbtn:hover{color:var(--teal);text-decoration:underline}
+.lbl{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--teal);margin:10px 0 4px}
+.rhythms{display:grid;gap:6px}
+.rhythm{display:grid;gap:2px;text-align:left;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:8px 12px;cursor:pointer;color:var(--ink);font:inherit}
+.rhythm span{font-size:.82rem;color:var(--muted)}
+.rhythm.on{border-color:var(--teal);background:var(--teal-soft)}
+.pacer{align-items:start}
+.pacer .orb{margin-top:6px}
+.nmcard .big{font:700 2.6rem/1 "Bricolage Grotesque",sans-serif;color:var(--teal)}
+.nmcard .big span{font-size:1rem;color:var(--muted);font-weight:500}
+.hist{margin:8px 0 0;padding-left:18px;font-size:.88rem;color:var(--muted)}
+@media (max-width:520px){.pacer .orb{margin:0 auto}.rhythm{text-align:left}}
 </style>
 </head>
 <body>
@@ -191,9 +209,7 @@ var DEFAULT_FEEDS=[
  ["Sander Dieleman","https://sander.ai/feed.xml"],
  ["Francis Bach","https://francisbach.com/feed/"],
  ["Off the Convex Path","http://www.offconvex.org/feed.xml"],
- ["Jane Street","https://blog.janestreet.com/feed.xml"],
  ["Google DeepMind","https://deepmind.google/blog/rss.xml"],
- ["Microsoft Research","https://www.microsoft.com/en-us/research/feed/"],
  ["The Gradient","https://thegradient.pub/rss/"],
  ["Terence Tao","https://terrytao.wordpress.com/feed/"],
  ["The n-Category Café","https://golem.ph.utexas.edu/category/atom10.xml"],
@@ -202,12 +218,17 @@ var DEFAULT_FEEDS=[
 
 function fresh(){
   return {v:2,tasks:[],profs:[],schools:[],habits:[{id:"breath",name:"Breathing exercises"},{id:"core",name:"Core and back routine"}],log:{},startDate:TODAY,
-    feeds:DEFAULT_FEEDS.map(function(f){return{id:uid(),name:f[0],url:f[1]}}),read:{},pick:{date:"",salt:0}};
+    feeds:DEFAULT_FEEDS.map(function(f){return{id:uid(),name:f[0],url:f[1]}}),read:{},pick:{date:"",salt:0},nm:{start:"",history:[],show:false},m3:1};
 }
 var state;
 try{state=JSON.parse(localStorage.getItem(LS)||"null");}catch(e){state=null}
 if(!state){state=fresh();try{var old=JSON.parse(localStorage.getItem("oct-sprint-state")||"null");if(old&&old.log)state.log=old.log;}catch(e){}}
-(function migrate(){var f=fresh();["tasks","profs","schools","habits","log","feeds","read","pick","startDate"].forEach(function(k){if(state[k]==null)state[k]=f[k]});state.v=2;})();
+function migrateState(d){
+  var f=fresh();["tasks","profs","schools","habits","log","feeds","read","pick","startDate","nm"].forEach(function(k){if(d[k]==null)d[k]=f[k]});
+  if(!d.m3){d.feeds=d.feeds.filter(function(x){return!/janestreet\.com|microsoft\.com/i.test(x.url)});d.m3=1;d._migrated=true;}
+  return d;
+}
+migrateState(state);
 var cache={};try{cache=JSON.parse(localStorage.getItem(LSF)||"{}")||{};}catch(e){cache={}}
 
 var VIEW=null;try{VIEW=new URLSearchParams(location.search).get("view");}catch(e){}
@@ -217,33 +238,33 @@ function lsSet(k,v){try{if(v)localStorage.setItem(k,v);else localStorage.removeI
 var SYNC={token:lsGet("tracker-token"),gist:lsGet("tracker-gist"),login:lsGet("tracker-login"),status:"",at:0,timer:null,busy:false};
 var viewer={owner:"",at:0,error:"",loaded:false};
 if(VIEW){state=fresh();state.feeds=[];}
-var ui={tab:"tasks",offset:-2,showDone:false,feedFilter:"all",loading:{}};
+var ui={tab:"tasks",offset:-2,showDone:false,feedFilter:"all",loading:{},q:"",hideRead:false,limit:50,pace:"coherent",pmin:5};
 var saveMsg="Saved";
 
 /* ---------- routines ---------- */
 var CORE=[
- {name:"Phase 1: Decompress and calm",weeks:"Weeks 1–2 · about 15 minutes",from:0,to:13,items:[
-  "360° breathing on your back, knees bent: 5 min (see Breathing)","Pelvic tilts: 2×10, slow","Knee-to-chest, one leg at a time: 3×20s per side",
-  "Prone press-ups (McKenzie): 2×8, only if they ease symptoms","Glute bridges: 2×10","Child's pose: 3×30s"]},
- {name:"Phase 2: Stability",weeks:"Weeks 3–6 · keep Phase 1 as a warm-up",from:14,to:41,items:[
-  "Modified curl-up (one knee bent, hands under low back): 3×8, 10s holds","Side plank from knees: 3×15–20s per side","Bird dog: 3×8 per side, 5s holds","Dead bug: 2×8 per side"]},
- {name:"Phase 3: Build",weeks:"Week 7 onward",from:42,to:99999,items:["Progress to full side planks and longer holds","Add front planks","Walk 20–30 min daily"]}
-];
-var BREATH=[
- {name:"Phase 1: Learn the breath",weeks:"Weeks 1–2 · about 10 minutes",from:0,to:13,items:[
-  "<b>Crocodile breathing:</b> lie face down, forehead on hands. Breathe in through the nose for 4s and feel your belly push into the floor and your lower back rise. Exhale slowly for 6s. 2 sets of 8 breaths.",
-  "<b>360° breathing:</b> on your back, knees bent, hands on your lower ribs. Inhale 4s through the nose so the ribs widen to the sides and back, not just the belly. Exhale 6s through the mouth, ribs sinking down. 5 min.",
-  "<b>90/90 wall breathing:</b> on your back, feet flat on a wall, knees and hips at 90°. Gently flatten your lower back. Inhale 4s, exhale fully for 6–8s until you feel your abs engage. 3 sets of 5 breaths.",
-  "Keep shoulders and neck relaxed throughout. If you feel dizzy, return to normal breathing."]},
- {name:"Phase 2: Breathe under load",weeks:"Weeks 3–6",from:14,to:41,items:[
-  "Keep 3 min of 360° breathing as a warm-up.",
+ {name:"Phase 1: Decompress and calm",weeks:"Weeks 1–2 · about 20 minutes",from:0,to:13,warm:[
+  "<b>Crocodile breathing:</b> lie face down, forehead on hands. Inhale 4s through the nose so your belly presses into the floor and your lower back rises. Exhale 6s. 2 sets of 8 breaths.",
+  "<b>360° breathing:</b> on your back, knees bent, hands on your lower ribs. Inhale 4s so the ribs widen to the sides and back, not just the belly. Exhale 6s, ribs sinking. 3 min.",
+  "<b>90/90 wall breathing:</b> on your back, feet flat on a wall, knees and hips at 90°, lower back gently flat. Inhale 4s, exhale fully for 6–8s until your abs engage. 3 sets of 5 breaths."],
+  items:["Pelvic tilts: 2×10, slow","Knee-to-chest, one leg at a time: 3×20s per side","Prone press-ups (McKenzie): 2×8, only if they ease symptoms","Glute bridges: 2×10","Child's pose: 3×30s"]},
+ {name:"Phase 2: Stability",weeks:"Weeks 3–6 · keep Phase 1 exercises as a warm-up",from:14,to:41,warm:[
+  "<b>360° breathing:</b> 2 min, as in Phase 1.",
   "<b>Breathing brace:</b> inhale 360°, then lightly tighten your abs (about 20–30% effort) as if expecting a poke. Keep breathing behind the brace for 5 breaths. 3 sets.",
-  "Use the brace during bird dog, dead bug and side planks: exhale on the hardest part of each rep.",
-  "<b>Box breathing</b> for calm or before sleep: 4s in, 4s hold, 4s out, 4s hold. 3–5 min."]},
- {name:"Phase 3: Make it automatic",weeks:"Week 7 onward",from:42,to:99999,items:[
-  "Brace before lifting anything, getting out of bed, or sneezing.","Hold a steady brace while walking for a few minutes at a time.","Keep 5 min of 360° or box breathing daily for recovery and stress."]}
+  "Hold that light brace through every exercise below, and exhale on the hardest part of each rep."],
+  items:["Modified curl-up (one knee bent, hands under low back): 3×8, 10s holds","Side plank from knees: 3×15–20s per side","Bird dog: 3×8 per side, 5s holds","Dead bug: 2×8 per side"]},
+ {name:"Phase 3: Build",weeks:"Week 7 onward",from:42,to:99999,warm:[
+  "<b>Breathing brace:</b> 3 sets of 5 breaths.",
+  "Brace before lifting anything, getting out of bed, or sneezing, and hold a light brace for a few minutes on walks."],
+  items:["Progress to full side planks and longer holds","Add front planks","Walk 20–30 min daily"]}
 ];
-var PACES={"Relax 4-6":[["Inhale",4,1],["Exhale",6,.55]],"Box 4-4-4-4":[["Inhale",4,1],["Hold",4,1],["Exhale",4,.55],["Hold",4,.55]],"Wall 4-8":[["Inhale",4,1],["Exhale",8,.55]]};
+var PACES=[
+ {id:"coherent",name:"Coherent 5-5",desc:"About 6 breaths a minute. The best everyday default for calm and heart-rate variability.",steps:[["Inhale",5,1],["Exhale",5,.55]]},
+ {id:"relax",name:"Relax 4-6",desc:"A longer exhale slows your heart rate. Good for stress or tension.",steps:[["Inhale",4,1],["Exhale",6,.55]]},
+ {id:"box",name:"Box 4-4-4-4",desc:"Even, steady counts. Good for focus before work or a meeting.",steps:[["Inhale",4,1],["Hold",4,1],["Exhale",4,.55],["Hold",4,.55]]},
+ {id:"478",name:"4-7-8",desc:"A wind-down rhythm for before sleep. Try 2–3 minutes, and skip the hold if you feel lightheaded.",steps:[["Inhale",4,1],["Hold",7,1],["Exhale",8,.55]]},
+ {id:"sigh",name:"Physiological sigh",desc:"Two inhales through the nose, then a long, slow exhale. A quick reset in 1–2 minutes.",steps:[["Inhale",2,.85],["Inhale more",1,1],["Exhale",6,.55]]}
+];
 
 /* ---------- helpers ---------- */
 function taskStatus(t){if(t.done)return"done";var d=diff(TODAY,t.date);return d<0?"late":d===0?"now":"up";}
@@ -258,7 +279,7 @@ function byKey(k){return function(a,b){var x=a[k]||"9999",y=b[k]||"9999";return 
 /* ---------- render ---------- */
 function render(){
   var chip=VIEW?(viewer.error?"Couldn't load: "+viewer.error:viewer.loaded?"View only · updated "+timeAgo(state.updatedAt||viewer.at):"Loading…"):(SYNC.token&&SYNC.gist?(SYNC.status||"Synced"):saveMsg);
-  var title=VIEW?(viewer.loaded?esc(state.greeting||"Greetings Mrs. Hema Sree Rohith <3"):"Tracker"):"Welcome Rohith!";
+  var title=VIEW?(viewer.loaded?esc(state.greeting||"Welcome Mrs. Rohith"):"Tracker"):"Hi Rohith";
   var h='<div class="wrap'+(VIEW?" ro":"")+'"><div class="top"><div><h1>'+title+'</h1><p class="sub">'+fmt(TODAY)+'</p></div><span class="chip" id="save" role="status">'+esc(chip)+'</span></div>';
   h+=timeline();
   h+='<div class="tabs" role="tablist">';
@@ -267,8 +288,8 @@ function render(){
   h+='</div>';
   h+=({tasks:tasksView,profs:profsView,schools:schoolsView,reading:readingView,daily:dailyView,backup:backupView}[ui.tab])();
   h+='</div>';
-  var y=window.scrollY,root=document.getElementById("root");root.innerHTML=h;window.scrollTo(0,y);
-  if(VIEW)[].forEach.call(root.querySelectorAll("input,select,textarea"),function(el){if(!el.closest(".pctl"))el.disabled=true;});
+  IMAP=null;var y=window.scrollY,root=document.getElementById("root");root.innerHTML=h;window.scrollTo(0,y);
+  if(VIEW)[].forEach.call(root.querySelectorAll("input,select,textarea"),function(el){if(!el.closest(".pctl")&&!el.classList.contains("keep"))el.disabled=true;});
 }
 
 function timeline(){
@@ -356,21 +377,49 @@ function schoolsView(){
 }
 
 /* ---------- reading ---------- */
-function allItems(){
-  var out=[];state.feeds.forEach(function(f){var c=cache[f.id];if(c&&c.items)c.items.forEach(function(it){out.push({feed:f,it:it})});});return out;
+var ARCH={data:null,status:"",loading:false},IMAP=null;
+function archiveUrls(){
+  var h=location.hostname,parts=location.pathname.split("/").filter(Boolean),v=Math.floor(Date.now()/600000),u=[];
+  if(/\.github\.io$/i.test(h)){var user=h.split(".")[0],repo=(parts.length&&!/\.html?$/i.test(parts[0]))?parts[0]:h;
+    u.push("https://raw.githubusercontent.com/"+user+"/"+repo+"/main/feeds.json?v="+v);}
+  u.push("feeds.json?v="+v);
+  return u;
 }
+function loadArchive(force){
+  if(ARCH.loading)return;ARCH.loading=true;
+  var urls=archiveUrls(),i=0;
+  (function next(){
+    if(i>=urls.length){ARCH.loading=false;ARCH.status="missing";IMAP=null;softRender();refreshRelays(force);return;}
+    fetchWithTimeout(urls[i++],20000).then(function(t){var d=JSON.parse(t);if(!d||!d.feeds)throw new Error("bad");
+      ARCH.data=d;ARCH.status="ok";ARCH.loading=false;IMAP=null;softRender();refreshRelays(force);}).catch(next);
+  })();
+}
+function archFor(f){var a=ARCH.data&&ARCH.data.feeds[f.url];return a&&a.items&&a.items.length?a:null;}
+function itemsMap(){
+  if(IMAP)return IMAP;IMAP={};
+  state.feeds.forEach(function(f){
+    var a=archFor(f),items=a?a.items.map(function(x){return{title:x.t,link:x.l,date:x.d||"",sum:x.s||""}}):[],seen={};
+    items.forEach(function(x){seen[x.link]=1});
+    var c=cache[f.id];if(c&&c.items)c.items.forEach(function(x){if(!seen[x.link]){seen[x.link]=1;items.push(x);}});
+    items.sort(function(a,b){return(a.date||"0")<(b.date||"0")?1:(a.date||"0")>(b.date||"0")?-1:0});
+    IMAP[f.id]=items;
+  });
+  return IMAP;
+}
+function allItems(){var m=itemsMap(),out=[];state.feeds.forEach(function(f){(m[f.id]||[]).forEach(function(it){out.push({feed:f,it:it})})});return out;}
 function todaysPick(){
   if(state.pick.date!==TODAY)state.pick={date:TODAY,salt:0,link:""};
+  var m=itemsMap();
   if(state.pick.link){var found=allItems().filter(function(x){return x.it.link===state.pick.link})[0];if(found)return found;}
-  var byFeed=state.feeds.map(function(f){var c=cache[f.id];return{f:f,items:(c&&c.items||[]).filter(function(it){return!state.read[it.link]})}}).filter(function(x){return x.items.length});
+  var byFeed=state.feeds.map(function(f){return{f:f,items:(m[f.id]||[]).filter(function(it){return!state.read[it.link]})}}).filter(function(x){return x.items.length});
   if(!byFeed.length)return null;
   var seed=hash(TODAY+":"+state.pick.salt),fb=byFeed[seed%byFeed.length],it=fb.items[hash(seed+"i")%fb.items.length];
   state.pick.link=it.link;if(!VIEW)persist();
   return{feed:fb.f,it:it};
 }
 function readingView(){
-  var h='<h2>Today\'s pick</h2>';
-  var any=allItems().length,p=any?todaysPick():null,loading=Object.keys(ui.loading).length;
+  var m=itemsMap(),loading=Object.keys(ui.loading).length||ARCH.loading;
+  var h='<h2>Today\'s pick</h2>',p=allItems().length?todaysPick():null;
   if(p){
     var rd=!!state.read[p.it.link];
     h+='<div class="pick"><div class="src">'+esc(p.feed.name)+(p.it.date?' · '+esc(fmtY(p.it.date)):'')+'</div>'+
@@ -379,34 +428,53 @@ function readingView(){
       '<div class="btns"><a class="primary" href="'+esc(safeUrl(p.it.link))+'" target="_blank" rel="noopener">Open article</a>'+
       '<button class="ghost" data-readtoggle="'+esc(p.it.link)+'">'+(rd?"Marked read ✓":"Mark as read")+'</button>'+
       '<button class="ghost" data-act="reroll">Pick another</button></div></div>';
-  }else{
-    h+='<div class="list"><div class="empty">'+(loading?"Loading feeds…":"No articles loaded yet. Tap Refresh feeds below (needs internet).")+'</div></div>';
-  }
-  var recent=allItems().filter(function(x){return x.it.date&&diff(x.it.date,TODAY)<=14});
-  if(ui.feedFilter!=="all")recent=recent.filter(function(x){return x.feed.id===ui.feedFilter});
-  recent.sort(function(a,b){return a.it.date<b.it.date?1:-1});
-  h+='<h2>New in the last 2 weeks ('+recent.length+')</h2>';
-  h+='<div class="filters"><button class="ghost" data-ff="all" aria-pressed="'+(ui.feedFilter==="all")+'">All</button>'+
-    state.feeds.map(function(f){return'<button class="ghost" data-ff="'+f.id+'" aria-pressed="'+(ui.feedFilter===f.id)+'">'+esc(f.name)+'</button>'}).join("")+'</div>';
-  h+=recent.length?'<ul class="list">'+recent.slice(0,40).map(itemRow).join("")+'</ul>':'<div class="list"><div class="empty">Nothing new in this window. Today\'s pick has you covered.</div></div>';
+  }else h+='<div class="list"><div class="empty">'+(loading?"Loading articles…":"No articles loaded yet. Tap Refresh below (needs internet).")+'</div></div>';
 
-  h+='<h2>Feeds ('+state.feeds.length+')</h2><div class="btns" style="margin-bottom:10px"><button class="primary" data-act="refresh">'+(loading?"Refreshing…":"Refresh feeds")+'</button></div>';
+  h+='<h2>Browse</h2><div class="filters"><button class="ghost" data-ff="all" aria-pressed="'+(ui.feedFilter==="all")+'">New this fortnight</button>'+
+    state.feeds.map(function(f){var n=(m[f.id]||[]).length;return'<button class="ghost" data-ff="'+f.id+'" aria-pressed="'+(ui.feedFilter===f.id)+'">'+esc(f.name)+(n?' <span class="cnt">'+n+'</span>':'')+'</button>'}).join("")+'</div>';
+  var sel=ui.feedFilter!=="all"&&find(state.feeds,ui.feedFilter);
+  if(sel){
+    var all=m[sel.id]||[],nread=all.filter(function(x){return state.read[x.link]}).length;
+    h+='<div class="fhead"><h3>All from '+esc(sel.name)+'</h3><span class="pmeta">'+all.length+' articles · '+nread+' read</span></div>'+
+      '<div class="fbar"><input type="search" id="fq" class="keep" placeholder="Search titles" value="'+esc(ui.q)+'" aria-label="Search titles">'+
+      '<label class="inline"><input type="checkbox" id="fhide" class="keep" '+(ui.hideRead?"checked":"")+'> Hide read</label></div>'+
+      '<div id="flist">'+feedListHtml()+'</div>';
+  }else{
+    var recent=allItems().filter(function(x){return x.it.date&&diff(x.it.date,TODAY)<=14&&diff(x.it.date,TODAY)>=-1});
+    recent.sort(function(a,b){return a.it.date<b.it.date?1:-1});
+    h+=recent.length?'<ul class="list">'+recent.slice(0,40).map(function(x){return itemRow(x,true)}).join("")+'</ul>':'<div class="list"><div class="empty">Nothing new in the last two weeks. Tap a feed above to browse all of its articles.</div></div>';
+  }
+
+  h+='<h2>Feeds ('+state.feeds.length+')</h2><div class="btns" style="margin-bottom:10px"><button class="primary" data-act="refresh">'+(loading?"Refreshing…":"Refresh")+'</button></div>';
   h+='<ul class="list">'+state.feeds.map(function(f){
-    var c=cache[f.id],st=ui.loading[f.id]?"Loading…":!c?"Not loaded yet":c.error?"Couldn't load: "+c.error:(c.items.length+(c.items.length===1?" article":" articles")+" · updated "+timeAgo(c.at));
-    return'<li class="row" style="grid-template-columns:1fr auto"><div><div class="t">'+esc(f.name)+'</div><div class="fstate'+(c&&c.error?" err":"")+'">'+esc(st)+'</div></div>'+
+    var a=archFor(f),c=cache[f.id],n=(m[f.id]||[]).length,st,err=false;
+    if(ui.loading[f.id])st="Loading recent posts…";
+    else if(a){st=n+" articles"+(a.mode==="paged"||a.mode==="sitemap"?" (full archive)":"")+" · daily update "+timeAgo(Date.parse(ARCH.data.generated));}
+    else if(c&&c.items&&c.items.length){st=n+" recent articles · "+timeAgo(c.at)+(ARCH.status==="ok"?" · full archive after the next daily update":"");}
+    else if(c&&c.error){st="Couldn't load right now"+(ARCH.status==="ok"?" · will appear after the next daily update":"");err=true;}
+    else st=ARCH.loading?"Loading…":"Not loaded yet";
+    return'<li class="row" style="grid-template-columns:1fr auto"><div><button class="linkbtn" data-ff="'+f.id+'">'+esc(f.name)+'</button><div class="fstate'+(err?" err":"")+'">'+esc(st)+'</div></div>'+
       '<button class="del" data-delfeed="'+f.id+'" aria-label="Remove '+esc(f.name)+'">×</button></li>';}).join("")+'</ul>';
   h+='<div class="form"><label>Feed name<input type="text" id="fn" placeholder="e.g. Lil\'Log"></label><label class="wide">Feed URL<input type="url" id="fu" placeholder="https://…/feed.xml"></label>'+
     '<button class="primary" data-act="addFeed">Add feed</button></div>';
-  h+='<p class="sub" style="font-size:.85rem;margin-top:12px">Feeds load through a public relay because browsers block direct feed requests from local files. Each feed only exposes its most recent posts (often 10–20), and the daily pick draws from those, rotating fairly across feeds.</p>';
+  if(ARCH.status!=="ok"&&!ARCH.loading)h+='<p class="sub" style="font-size:.85rem;margin-top:12px">Showing recent posts only. Full archives appear once the daily GitHub job (feeds.yml) has run.</p>';
   return h;
 }
-function itemRow(x){
-  var rd=!!state.read[x.it.link];
+function feedListHtml(){
+  var f=find(state.feeds,ui.feedFilter);if(!f)return"";
+  var q=(ui.q||"").toLowerCase().trim(),list=(itemsMap()[f.id]||[]).filter(function(x){return(!q||x.title.toLowerCase().indexOf(q)>=0)&&!(ui.hideRead&&state.read[x.link])});
+  if(!list.length)return'<div class="list"><div class="empty">'+(q?"No titles match.":"Nothing to show yet.")+'</div></div>';
+  var more=list.length-ui.limit;
+  return'<ul class="list">'+list.slice(0,ui.limit).map(function(it){return itemRow({feed:f,it:it},false)}).join("")+'</ul>'+
+    (more>0?'<div class="btns" style="margin-top:10px"><button class="ghost" data-act="more">Show '+Math.min(more,50)+' more ('+more+' left)</button></div>':'');
+}
+function itemRow(x,showFeed){
+  var rd=!!state.read[x.it.link],meta=[showFeed?x.feed.name:"",x.it.date?fmtY(x.it.date):""].filter(Boolean).join(" · ");
   return'<li class="row item'+(rd?" read":"")+'" style="grid-template-columns:1fr auto"><div><a href="'+esc(safeUrl(x.it.link))+'" target="_blank" rel="noopener">'+esc(x.it.title)+'</a>'+
-    '<div class="m">'+esc(x.feed.name)+' · '+esc(fmtY(x.it.date))+'</div></div>'+
+    (meta?'<div class="m">'+esc(meta)+'</div>':'')+'</div>'+
     '<button class="ghost" data-readtoggle="'+esc(x.it.link)+'" style="font-size:.8rem;padding:5px 10px">'+(rd?"Read ✓":"Mark read")+'</button></li>';
 }
-function timeAgo(t){var m=Math.round((Date.now()-t)/60000);if(m<1)return"just now";if(m<60)return m+" min ago";var h=Math.round(m/60);if(h<48)return h+"h ago";return Math.round(h/24)+"d ago";}
+function timeAgo(t){if(!t||isNaN(t))return"";var m=Math.round((Date.now()-t)/60000);if(m<1)return"just now";if(m<60)return m+" min ago";var h=Math.round(m/60);if(h<48)return h+"h ago";return Math.round(h/24)+"d ago";}
 
 function fetchWithTimeout(url,ms){
   var ctl=new AbortController(),t=setTimeout(function(){ctl.abort()},ms);
@@ -414,12 +482,11 @@ function fetchWithTimeout(url,ms){
 }
 function fetchFeedText(url){
   var e=encodeURIComponent(url);
-  var tries=[url,"https://api.allorigins.win/raw?url="+e,"https://corsproxy.io/?url="+e,"https://api.codetabs.com/v1/proxy?quest="+e];
+  var tries=[url,"https://api.allorigins.win/raw?url="+e,"https://api.codetabs.com/v1/proxy?quest="+e,"https://corsproxy.io/?url="+e];
   var i=0;
   function next(){
-    if(i>=tries.length)return Promise.reject(new Error("all relays failed"));
-    var u=tries[i++];
-    return fetchWithTimeout(u,15000).then(function(txt){if(!/<(rss|feed|rdf)/i.test(txt))throw new Error("not a feed");return txt;}).catch(next);
+    if(i>=tries.length)return Promise.reject(new Error("unavailable"));
+    return fetchWithTimeout(tries[i++],15000).then(function(txt){if(!/<(rss|feed|rdf)/i.test(txt))throw new Error("not a feed");return txt;}).catch(next);
   }
   return next();
 }
@@ -449,14 +516,15 @@ function refreshFeed(f){
     cache[f.id]={at:Date.now(),items:items};
   }).catch(function(err){
     var prev=cache[f.id];cache[f.id]={at:Date.now(),items:prev&&prev.items||[],error:err.message||"failed"};
-  }).then(function(){delete ui.loading[f.id];saveCache();softRender();});
+  }).then(function(){delete ui.loading[f.id];IMAP=null;saveCache();softRender();});
 }
-function refreshAll(force){
-  var stale=state.feeds.filter(function(f){var c=cache[f.id];return force||!c||Date.now()-c.at>6*3600000||!c.items.length;});
-  stale.forEach(function(f){ui.loading[f.id]=1});
-  if(stale.length)softRender();
-  stale.forEach(refreshFeed);
+function refreshRelays(force){
+  var need=state.feeds.filter(function(f){if(archFor(f))return false;var c=cache[f.id];return force||!c||Date.now()-c.at>6*3600000||!c.items.length;});
+  need.forEach(function(f){ui.loading[f.id]=1});
+  if(need.length)softRender();
+  need.forEach(refreshFeed);
 }
+function refreshAll(force){if(force||!ARCH.data)loadArchive(force);else refreshRelays(false);}
 function saveCache(){
   var keep={};state.feeds.forEach(function(f){if(cache[f.id])keep[f.id]=cache[f.id]});cache=keep;
   try{localStorage.setItem(LSF,JSON.stringify(cache));}catch(e){}
@@ -468,6 +536,9 @@ function softRender(){
 }
 var pendingRender=false;
 document.addEventListener("focusout",function(){if(pendingRender){pendingRender=false;setTimeout(function(){if(ui.tab==="reading")render()},50);}});
+document.addEventListener("input",function(e){
+  if(e.target.id==="fq"){ui.q=e.target.value;ui.limit=50;var el=document.getElementById("flist");if(el)el.innerHTML=feedListHtml();}
+});
 
 /* ---------- daily ---------- */
 function dailyView(){
@@ -480,21 +551,44 @@ function dailyView(){
     h+='</div></div>';
   });
   h+='</div><div class="form" style="grid-template-columns:1fr auto"><label>New daily habit<input type="text" id="nh" placeholder="e.g. Read today\'s pick"></label><button class="primary" data-act="addHabit">Add habit</button></div>';
-  h+='<div class="inline" style="margin-top:16px"><span>Routine start date</span><input type="date" class="sm" id="sd" value="'+esc(state.startDate)+'"><span>(phases move forward from here)</span></div>';
-  var b=phaseFor(BREATH);
-  h+='<h2>Breathing</h2>'+phaseHtml(b,true,true);
-  h+='<div class="pacer"><div class="orb" id="orb"><span id="orbt">Ready</span></div><div class="pctl"><h3>Breath pacer</h3><div class="opts">'+
-    Object.keys(PACES).map(function(k){return'<button class="ghost" data-pace="'+esc(k)+'">'+esc(k)+'</button>'}).join("")+'</div>'+
-    '<div class="inline"><span>Minutes</span><input type="number" id="pmin" min="1" max="30" value="5" style="width:70px"><button class="ghost" data-act="stopPace">Stop</button></div><div class="pmeta" id="pleft"></div></div></div>';
-  h+='<details><summary>All breathing phases</summary>'+BREATH.filter(function(p){return p!==b}).map(function(p){return phaseHtml(p,false,true)}).join("")+'</details>';
+  h+=nmView();
+
+  h+='<h2>Breathe</h2><p class="sub" style="margin:-4px 0 12px">Sit upright with your shoulders relaxed and breathe through your nose. Pick a rhythm and follow the circle.</p>';
+  h+='<div class="pacer"><div class="orb" id="orb"><span id="orbt">Ready</span></div><div class="pctl">'+
+    '<div class="rhythms">'+PACES.map(function(p){return'<button class="rhythm'+(ui.pace===p.id?" on":"")+'" data-pace="'+p.id+'"><b>'+esc(p.name)+'</b><span>'+esc(p.desc)+'</span></button>'}).join("")+'</div>'+
+    '<div class="inline"><span>Minutes</span><input type="number" id="pmin" min="1" max="30" value="'+ui.pmin+'" style="width:70px"><button class="primary" data-act="startPace">Start</button><button class="ghost" data-act="stopPace">Stop</button></div>'+
+    '<div class="pmeta" id="pleft"></div></div></div>';
+
+  h+='<div class="inline" style="margin-top:28px"><span>Routine start date</span><input type="date" class="sm" id="sd" value="'+esc(state.startDate)+'"><span>(core phases move forward from here)</span></div>';
   var c=phaseFor(CORE);
-  h+='<h2>Core and back</h2>'+phaseHtml(c,true,false);
-  h+='<details><summary>All core phases</summary>'+CORE.filter(function(p){return p!==c}).map(function(p){return phaseHtml(p,false,false)}).join("")+'</details>';
+  h+='<h2>Core and back</h2>'+phaseHtml(c,true);
+  h+='<details><summary>All core phases</summary>'+CORE.filter(function(p){return p!==c}).map(function(p){return phaseHtml(p,false)}).join("")+'</details>';
   h+='<div class="note"><strong>Avoid for now:</strong> sit-ups, crunches, leg raises, Russian twists, toe touches, heavy loaded bending. <strong>Stop</strong> if pain spreads down the leg or numbness or weakness gets worse. Get a physio\'s okay before progressing.</div>';
   return h;
 }
-function phaseHtml(p,cur,html){
-  return'<div class="phase'+(cur?" cur":"")+'"><h3>'+esc(p.name)+(cur?' (current)':'')+'</h3><div class="w">'+esc(p.weeks)+'</div><ul>'+p.items.map(function(i){return"<li>"+(html?i:esc(i))+"</li>"}).join("")+'</ul></div>';
+function phaseHtml(p,cur){
+  return'<div class="phase'+(cur?" cur":"")+'"><h3>'+esc(p.name)+(cur?' (current)':'')+'</h3><div class="w">'+esc(p.weeks)+'</div>'+
+    (p.warm?'<div class="lbl">Breathing warm-up</div><ul>'+p.warm.map(function(i){return"<li>"+i+"</li>"}).join("")+'</ul><div class="lbl">Exercises</div>':'')+
+    '<ul>'+p.items.map(function(i){return"<li>"+esc(i)+"</li>"}).join("")+'</ul></div>';
+}
+function nmView(){
+  var n=state.nm||{};
+  if(VIEW&&!n.show)return"";
+  var h='<h2>No-masturbation streak</h2><div class="habit nmcard">';
+  if(!n.start){
+    h+=VIEW?'<p class="sub" style="margin:0">Not started yet.</p>':
+      '<p class="sub" style="margin:0 0 10px">Counts the days since your last reset.</p><div class="inline"><span>Starting from</span><input type="date" class="sm" id="nmstart" value="'+TODAY+'"><button class="primary" data-act="nmStart">Start streak</button></div>';
+  }else{
+    var cur=Math.max(0,diff(n.start,TODAY)),hist=n.history||[],best=hist.reduce(function(mx,x){return Math.max(mx,x.days)},cur);
+    var ms=[7,14,30,60,90,180,365],next=ms.filter(function(x){return x>cur})[0],prev=ms.filter(function(x){return x<=cur}).pop()||0;
+    h+='<div class="big">'+cur+'<span> day'+(cur===1?'':'s')+'</span></div>'+
+      '<div class="streak">Since '+fmtY(n.start)+' · best '+best+' days'+(next?' · next milestone: '+next+' days':'')+'</div>';
+    if(next)h+='<div class="bar"><i style="width:'+Math.round((cur-prev)/(next-prev)*100)+'%"></i></div>';
+    if(!VIEW)h+='<div class="btns" style="margin-top:12px"><button class="ghost" data-act="nmReset">Log a reset</button></div>';
+    if(hist.length)h+='<details><summary>Past streaks ('+hist.length+')</summary><ul class="hist">'+hist.slice().reverse().slice(0,30).map(function(x){return'<li>'+x.days+' days · '+fmtY(x.start)+' to '+fmtY(x.end)+'</li>'}).join("")+'</ul></details>';
+  }
+  if(!VIEW)h+='<label class="inline" style="margin-top:12px"><input type="checkbox" id="nmshow" '+(n.show?"checked":"")+'> Show on the view-only link</label>';
+  return h+'</div>';
 }
 function backupView(){
   var h='<h2>Share with someone</h2>';
@@ -535,7 +629,7 @@ function gistData(g){
   if(f.truncated)return fetch(f.raw_url).then(function(r){return r.json()});
   return Promise.resolve(JSON.parse(f.content));
 }
-function normalize(d){var fr=fresh();["tasks","profs","schools","habits","log","feeds","read","pick","startDate"].forEach(function(k){if(d[k]==null)d[k]=fr[k]});return d;}
+function normalize(d){return migrateState(d);}
 function hasData(d){return d&&((d.tasks||[]).length||(d.profs||[]).length||(d.schools||[]).length||Object.keys(d.log||{}).length);}
 function connect(){
   var t=val("tok");if(!t)return focus("tok");
@@ -604,44 +698,46 @@ function find(list,id){return list.filter(function(p){return p.id===id})[0]}
 
 /* ---------- pacer ---------- */
 var pace=null;
-function startPace(name){
+function startPace(id){
   stopPace();
-  var steps=PACES[name],mins=Math.max(1,Math.min(30,+document.getElementById("pmin").value||5)),endAt=Date.now()+mins*60000,i=0;
-  pace={};
+  var P=PACES.filter(function(p){return p.id===id})[0]||PACES[0],steps=P.steps;
+  var mins=Math.max(1,Math.min(30,+document.getElementById("pmin").value||5)),endAt=Date.now()+mins*60000,i=0,breaths=0;
+  ui.pmin=mins;pace={};
   function step(){
     var orb=document.getElementById("orb"),txt=document.getElementById("orbt");
     if(!orb){stopPace();return;}
-    if(Date.now()>=endAt){txt.textContent="Done";orb.style.setProperty("--s",".55");stopPace(true);return;}
-    var s=steps[i%steps.length];i++;
+    if(i%steps.length===0&&Date.now()>=endAt){txt.textContent="Done";orb.style.setProperty("--s",".55");stopPace(true);return;}
+    var s=steps[i%steps.length];if(i%steps.length===0)breaths++;i++;
     orb.style.setProperty("--dur",s[1]+"s");orb.style.setProperty("--s",s[2]);
     var left=s[1];txt.textContent=s[0]+" "+left;
     clearInterval(pace.tick);pace.tick=setInterval(function(){left--;if(left>0)txt.textContent=s[0]+" "+left;},1000);
     pace.timer=setTimeout(step,s[1]*1000);
   }
-  pace.clock=setInterval(function(){var el=document.getElementById("pleft");if(el){var r=Math.max(0,Math.round((endAt-Date.now())/1000));el.textContent=name+": "+Math.floor(r/60)+":"+pad(r%60)+" left";}},500);
+  pace.clock=setInterval(function(){var el=document.getElementById("pleft");if(el){var r=Math.max(0,Math.round((endAt-Date.now())/1000));el.textContent=P.name+" · breath "+breaths+" · "+Math.floor(r/60)+":"+pad(r%60)+" left";}},500);
   step();
 }
-function stopPace(keep){
+function stopPace(done){
   if(!pace)return;clearTimeout(pace.timer);clearInterval(pace.tick);clearInterval(pace.clock);pace=null;
   var orb=document.getElementById("orb"),el=document.getElementById("pleft");
-  if(orb&&!keep){orb.style.setProperty("--s",".55");document.getElementById("orbt").textContent="Ready";}
-  if(el)el.textContent=keep?"Session complete. Nice work.":"";
+  if(orb&&!done){orb.style.setProperty("--s",".55");document.getElementById("orbt").textContent="Ready";}
+  if(el)el.textContent=done?"Session complete. Nice work.":"";
+  if(done&&!VIEW&&find(state.habits,"breath")){var l=state.log[TODAY]||(state.log[TODAY]={});if(!l.breath){l.breath=true;persist();var cb=document.querySelector("[data-habit=breath]");if(cb)cb.checked=true;if(el)el.textContent="Session complete. Breathing ticked off for today.";}}
 }
 
 /* ---------- events ---------- */
 document.addEventListener("click",function(e){
   var t=e.target.closest("button");if(!t)return;var d=t.dataset;
-  if(VIEW&&!(d.tab||d.shift!=null||d.ff||d.pace||d.act==="stopPace"))return;
+  if(VIEW&&!(d.tab||d.shift!=null||d.ff||d.pace||d.act==="stopPace"||d.act==="startPace"||d.act==="more"))return;
   if(d.tab){stopPace();ui.tab=d.tab;render();if(d.tab==="reading")refreshAll(false);return;}
   if(d.shift!=null){ui.offset=+d.shift===0?-2:ui.offset+(+d.shift);render();return;}
   if(d.deltask){state.tasks=state.tasks.filter(function(x){return x.id!==d.deltask});save();return;}
   if(d.delprof){var p=find(state.profs,d.delprof);if(p&&confirm("Remove "+p.name+"?")){state.profs=state.profs.filter(function(x){return x.id!==d.delprof});save();}return;}
   if(d.delschool){var s=find(state.schools,d.delschool);if(s&&confirm("Remove "+s.name+"?")){state.schools=state.schools.filter(function(x){return x.id!==d.delschool});save();}return;}
   if(d.delhabit){var hb=find(state.habits,d.delhabit);if(hb&&confirm("Remove the habit \""+hb.name+"\"?")){state.habits=state.habits.filter(function(x){return x.id!==d.delhabit});save();}return;}
-  if(d.delfeed){var f=find(state.feeds,d.delfeed);if(f&&confirm("Remove the feed \""+f.name+"\"?")){state.feeds=state.feeds.filter(function(x){return x.id!==d.delfeed});if(ui.feedFilter===d.delfeed)ui.feedFilter="all";saveCache();save();}return;}
+  if(d.delfeed){var f=find(state.feeds,d.delfeed);if(f&&confirm("Remove the feed \""+f.name+"\"?")){state.feeds=state.feeds.filter(function(x){return x.id!==d.delfeed});IMAP=null;if(ui.feedFilter===d.delfeed)ui.feedFilter="all";saveCache();save();}return;}
   if(d.readtoggle){if(state.read[d.readtoggle])delete state.read[d.readtoggle];else state.read[d.readtoggle]=TODAY;save();return;}
-  if(d.ff){ui.feedFilter=d.ff;render();return;}
-  if(d.pace){startPace(d.pace);return;}
+  if(d.ff){ui.feedFilter=d.ff;ui.q="";ui.limit=50;render();var fh=document.querySelector(".filters");if(fh&&t.classList.contains("linkbtn"))fh.scrollIntoView({behavior:"smooth",block:"start"});return;}
+  if(d.pace){ui.pace=d.pace;[].forEach.call(document.querySelectorAll(".rhythm"),function(b){b.classList.toggle("on",b.dataset.pace===d.pace)});startPace(d.pace);return;}
   var a=d.act;
   if(a==="addTask")addTask();else if(a==="addProf")addProf();else if(a==="addSchool")addSchool();else if(a==="addHabit")addHabit();else if(a==="addFeed")addFeed();
   else if(a==="reroll"){state.pick.salt=(state.pick.salt||0)+1;state.pick.link="";save();}
@@ -651,12 +747,17 @@ document.addEventListener("click",function(e){
   else if(a==="disconnect"){if(confirm("Disconnect this device? Your data stays here and on GitHub.")){clearTimeout(SYNC.timer);SYNC={token:"",gist:"",login:"",status:"",at:0,timer:null};lsSet("tracker-token","");lsSet("tracker-gist","");lsSet("tracker-login","");render();}}
   else if(a==="copylink"){var v=document.getElementById("vlink");v.select();(navigator.clipboard?navigator.clipboard.writeText(v.value):Promise.reject()).then(function(){t.textContent="Copied";},function(){document.execCommand("copy");t.textContent="Copied";});}
   else if(a==="stopPace")stopPace();
+  else if(a==="startPace")startPace(ui.pace);
+  else if(a==="more"){ui.limit+=50;var fl=document.getElementById("flist");if(fl)fl.innerHTML=feedListHtml();}
+  else if(a==="nmStart"){state.nm={start:val("nmstart")||TODAY,history:(state.nm&&state.nm.history)||[],show:!!(state.nm&&state.nm.show)};save();}
+  else if(a==="nmReset"){var cur=Math.max(0,diff(state.nm.start,TODAY));if(confirm("Log a reset? Your "+cur+"-day streak is saved to history and a new one starts today.")){state.nm.history=(state.nm.history||[]).concat([{start:state.nm.start,end:TODAY,days:cur}]);state.nm.start=TODAY;save();}}
   else if(a==="export")exportData();
   else if(a==="import")document.getElementById("imp").click();
   else if(a==="reset"){if(confirm("Erase everything? This can't be undone unless you have a backup.")){state=fresh();cache={};saveCache();save();}}
 });
 document.addEventListener("change",function(e){
   var t=e.target,d=t.dataset;
+  if(t.id==="fhide"){ui.hideRead=t.checked;ui.limit=50;var fl=document.getElementById("flist");if(fl)fl.innerHTML=feedListHtml();return;}
   if(VIEW)return;
   if(d.task){state.tasks.forEach(function(x){if(x.id===d.task)x.done=t.checked});var db=document.getElementById("donebox");ui.showDone=!!db&&db.open;save();}
   else if(d.tdate){state.tasks.forEach(function(x){if(x.id===d.tdate)x.date=t.value});save();}
@@ -666,6 +767,8 @@ document.addEventListener("change",function(e){
     save();}
   else if(d.sf){var s=find(state.schools,d.sid);if(!s)return;s[d.sf]=t.value;save();}
   else if(d.sck){var s2=find(state.schools,d.sid);if(!s2)return;s2.checks=s2.checks||{};s2.checks[d.sck]=t.checked;save();}
+  else if(t.id==="nmshow"){state.nm.show=t.checked;save();}
+  else if(t.id==="pmin"){ui.pmin=Math.max(1,Math.min(30,+t.value||5));}
   else if(t.id==="greet"){state.greeting=t.value.trim()||"Welcome Mrs. Rohith";save();}
   else if(t.id==="sd"&&t.value){state.startDate=t.value;save();}
   else if(t.id==="imp"&&t.files[0])importData(t.files[0]);
@@ -699,6 +802,7 @@ function importData(f){
 }
 
 render();
+if(state._migrated){delete state._migrated;if(!VIEW)persist();}
 if(VIEW)loadView();else{refreshAll(false);pullRemote();setInterval(pullRemote,5*60000);}
 if(VIEW)setInterval(loadView,5*60000);
 })();
